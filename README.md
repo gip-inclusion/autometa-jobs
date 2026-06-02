@@ -1,8 +1,8 @@
 # autometa-jobs
 
-Agents Claude autonomes auto-hébergés sur Scaleway, facturés sur un abonnement Claude Max plutôt qu'au token via l'API. On déclenche un *pipeline* → un container sandboxé éphémère lance la CLI `claude` aussi longtemps que la tâche le demande (jusqu'à 24h) → le résultat atterrit dans S3.
+Agents autonomes auto-hébergés sur Scaleway. On déclenche un *pipeline* → un container sandboxé éphémère lance l'agent via CLI aussi longtemps que la tâche le demande (jusqu'à 24h) → le résultat atterrit dans S3.
 
-> Mono-locataire par construction. Concurrence 1. Pensé pour un usage solo. Équivalent auto-hébergé de [Claude Managed Agents](https://www.anthropic.com/engineering/claude-managed-agents) pour le cas où on préfère payer l'abonnement plutôt que les tokens.
+> Mono-locataire par construction. Concurrence 1. Pensé pour un usage solo. Équivalent auto-hébergé de [Claude Managed Agents](https://www.anthropic.com/engineering/claude-managed-agents).
 
 ## Par où commencer
 
