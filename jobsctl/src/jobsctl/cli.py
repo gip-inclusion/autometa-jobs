@@ -11,11 +11,35 @@ from rich.table import Table
 console = Console()
 
 
+def _config_path() -> str:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "autometa-jobs", "config.env")
+
+
+def _stored_config() -> dict[str, str]:
+    path = _config_path()
+    if not os.path.exists(path):
+        return {}
+    config = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            config[key.strip()] = value.strip()
+    return config
+
+
 def _client() -> httpx.Client:
-    base = os.environ.get("PIPOMETA_URL")
-    api_key = os.environ.get("PIPOMETA_API_KEY")
+    stored = _stored_config()
+    base = os.environ.get("PIPOMETA_URL") or stored.get("PIPOMETA_URL")
+    api_key = os.environ.get("PIPOMETA_API_KEY") or stored.get("PIPOMETA_API_KEY")
     if not base or not api_key:
-        console.print("[red]PIPOMETA_URL and PIPOMETA_API_KEY must be set[/red]")
+        console.print(
+            "[red]PIPOMETA_URL and PIPOMETA_API_KEY must be set "
+            "(env, or ~/.config/autometa-jobs/config.env via bin/setup.sh)[/red]"
+        )
         sys.exit(2)
     return httpx.Client(base_url=base.rstrip("/"), headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
 
