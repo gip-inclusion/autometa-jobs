@@ -16,11 +16,13 @@ Un pipeline s'utilise de deux manières, selon que la tâche change ou non d'un 
 
 ## Avant de commencer
 
-Les exemples ci-dessous utilisent `jobsctl`, la CLI fournie dans le dépôt. Installation (Python 3.12+) :
+Les exemples ci-dessous utilisent `jobsctl`, la CLI fournie dans le dépôt. Avec [uv](https://docs.astral.sh/uv/), depuis la racine du dépôt :
 
 ```sh
-pipx install ./jobsctl        # ou : pip install ./jobsctl
+uv tool install ./jobsctl     # installe la commande `jobsctl`
 ```
+
+Pour la lancer sans l'installer : `uvx --from ./jobsctl jobsctl <commande>`.
 
 Un administrateur vous fournit deux valeurs d'accès, à exporter dans votre terminal — `jobsctl` les lit, et elles sont à reposer dans chaque nouveau terminal :
 
@@ -87,35 +89,26 @@ L'arrêt est propre : le run sort dès qu'il peut et passe en `cancelled`.
 
 ## Créer ou modifier un pipeline
 
-`jobsctl` déclenche et suit les runs ; la définition des pipelines passe par l'API HTTP directement. Un pipeline, c'est un nom, une consigne et une config :
+Un pipeline, c'est un nom, une consigne et une config. La consigne étant souvent longue, le plus simple est de la mettre dans un fichier :
 
 ```sh
-curl -fsS -X POST "$PIPOMETA_URL/pipelines" \
-  -H "Authorization: Bearer $PIPOMETA_API_KEY" -H "Content-Type: application/json" -d "$(cat <<'JSON'
-{
-  "name": "brief-hebdo",
-  "system_prompt": "...votre consigne, voir le template ci-dessous...",
-  "config": {
-    "scaleway_job_definition_id": "<demandez-cet-id>",
-    "max_turns": 20,
-    "allowed_tools": ["Bash", "Read", "WebFetch"]
-  }
-}
-JSON
-)"
+# consigne.txt contient le system_prompt (voir le template ci-dessous)
+jobsctl pipeline-create \
+  --name brief-hebdo \
+  --system-prompt-file consigne.txt \
+  --config '{"scaleway_job_definition_id": "<demandez-cet-id>", "max_turns": 20, "allowed_tools": ["Bash", "Read", "WebFetch"]}'
 ```
 
-- `system_prompt` — la consigne permanente de l'agent (voir le template ci-dessous).
-- `allowed_tools` — les outils qu'il a le droit d'utiliser ; liste vide pour tout interdire.
-- `scaleway_job_definition_id` — identifiant technique constant, demandez-le une fois à qui gère l'infra.
+- `--system-prompt` / `--system-prompt-file` — la consigne permanente de l'agent (voir le template ci-dessous).
+- `--config` / `--config-file` — la config JSON. `allowed_tools` : les outils autorisés (liste vide pour tout interdire) ; `scaleway_job_definition_id` : identifiant technique constant, demandez-le une fois à qui gère l'infra.
 
-Pour ajuster un pipeline existant (n'importe quel sous-ensemble de `name` / `system_prompt` / `config`) :
+Pour ajuster un pipeline existant, ne passez que ce qui change :
 
 ```sh
-curl -fsS -X PATCH "$PIPOMETA_URL/pipelines/<pipeline-id>" \
-  -H "Authorization: Bearer $PIPOMETA_API_KEY" -H "Content-Type: application/json" \
-  -d '{"system_prompt": "..."}'
+jobsctl pipeline-update <pipeline-id> --system-prompt-file consigne.txt
 ```
+
+(`jobsctl pipeline-get <pipeline-id>` affiche un pipeline en détail.)
 
 ### Template de consigne (`system_prompt`)
 
@@ -185,7 +178,7 @@ Une consigne précise sur le **format de sortie** et les **contraintes** donne d
 autometa-jobs/
 ├── orchestrator/   # l'API : déclenchement, suivi, réconciliation des runs
 ├── worker/         # ce qui tourne dans le container éphémère + dépose l'artefact
-├── jobsctl/        # la CLI : trigger / status / events / cancel
+├── jobsctl/        # la CLI : pipelines, trigger, status, events, cancel
 ├── infra/          # scripts de provisionnement Scaleway
 └── *.md            # doc interne (conception, ressources d'infra)
 ```
