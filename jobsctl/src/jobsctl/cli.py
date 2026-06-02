@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from typing import IO
 
 import click
 import httpx
@@ -19,6 +20,23 @@ def _client() -> httpx.Client:
     return httpx.Client(base_url=base.rstrip("/"), headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
 
 
+def _resolve(inline: str | None, file: IO[str] | None) -> str | None:
+    if inline is not None:
+        return inline
+    if file is not None:
+        return file.read()
+    return None
+
+
+def _parse_config(raw: str | None) -> dict | None:
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(f"invalid config JSON: {exc}")
+
+
 @click.group()
 def cli() -> None:
     """autometa-jobs control plane."""
@@ -33,6 +51,76 @@ def list_pipelines() -> None:
     for p in r.json():
         table.add_row(p["name"], p["id"], p["created_at"])
     console.print(table)
+
+
+@cli.command("pipeline-get")
+@click.argument("pipeline_id")
+def pipeline_get(pipeline_id: str) -> None:
+    """Show a single pipeline."""
+    with _client() as c:
+        r = c.get(f"/pipelines/{pipeline_id}")
+        r.raise_for_status()
+    console.print_json(json.dumps(r.json()))
+
+
+@cli.command("pipeline-create")
+@click.option("--name", required=True)
+@click.option("--system-prompt", help="Consigne inline (ou --system-prompt-file)")
+@click.option("--system-prompt-file", type=click.File("r"), help="Fichier contenant la consigne")
+@click.option("--config", help="Config JSON inline (ou --config-file)")
+@click.option("--config-file", type=click.File("r"), help="Fichier JSON de config")
+def pipeline_create(
+    name: str,
+    system_prompt: str | None,
+    system_prompt_file: IO[str] | None,
+    config: str | None,
+    config_file: IO[str] | None,
+) -> None:
+    """Create a pipeline."""
+    prompt = _resolve(system_prompt, system_prompt_file)
+    if prompt is None:
+        raise click.ClickException("provide --system-prompt or --system-prompt-file")
+    body: dict = {"name": name, "system_prompt": prompt}
+    cfg = _parse_config(_resolve(config, config_file))
+    if cfg is not None:
+        body["config"] = cfg
+    with _client() as c:
+        r = c.post("/pipelines", json=body)
+        r.raise_for_status()
+    console.print_json(json.dumps(r.json()))
+
+
+@cli.command("pipeline-update")
+@click.argument("pipeline_id")
+@click.option("--name")
+@click.option("--system-prompt", help="Consigne inline (ou --system-prompt-file)")
+@click.option("--system-prompt-file", type=click.File("r"), help="Fichier contenant la consigne")
+@click.option("--config", help="Config JSON inline (ou --config-file)")
+@click.option("--config-file", type=click.File("r"), help="Fichier JSON de config")
+def pipeline_update(
+    pipeline_id: str,
+    name: str | None,
+    system_prompt: str | None,
+    system_prompt_file: IO[str] | None,
+    config: str | None,
+    config_file: IO[str] | None,
+) -> None:
+    """Update name/system_prompt/config of a pipeline."""
+    body: dict = {}
+    if name is not None:
+        body["name"] = name
+    prompt = _resolve(system_prompt, system_prompt_file)
+    if prompt is not None:
+        body["system_prompt"] = prompt
+    cfg = _parse_config(_resolve(config, config_file))
+    if cfg is not None:
+        body["config"] = cfg
+    if not body:
+        raise click.ClickException("nothing to update: pass --name, --system-prompt(-file) or --config(-file)")
+    with _client() as c:
+        r = c.patch(f"/pipelines/{pipeline_id}", json=body)
+        r.raise_for_status()
+    console.print_json(json.dumps(r.json()))
 
 
 @cli.command("trigger")
