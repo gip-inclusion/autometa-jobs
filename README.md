@@ -16,20 +16,13 @@ Un pipeline s'utilise de deux manières, selon que la tâche change ou non d'un 
 
 ## Avant de commencer
 
-Les exemples ci-dessous utilisent `jobsctl`, la CLI fournie dans le dépôt. Avec [uv](https://docs.astral.sh/uv/), depuis la racine du dépôt :
+Les exemples ci-dessous utilisent `jobsctl`, la CLI fournie dans le dépôt. Un administrateur vous fournit deux valeurs d'accès (l'adresse de l'orchestrateur et une clé). Renseignez-les en haut de [`bin/setup.sh`](bin/setup.sh), puis lancez-le une fois ([uv](https://docs.astral.sh/uv/) requis) :
 
 ```sh
-uv tool install ./jobsctl     # installe la commande `jobsctl`
+./bin/setup.sh
 ```
 
-Pour la lancer sans l'installer : `uvx --from ./jobsctl jobsctl <commande>`.
-
-Un administrateur vous fournit deux valeurs d'accès, à exporter dans votre terminal — `jobsctl` les lit, et elles sont à reposer dans chaque nouveau terminal :
-
-```sh
-export PIPOMETA_URL="https://...."      # adresse de l'orchestrateur
-export PIPOMETA_API_KEY="...."          # clé d'accès
-```
+Le script stocke les accès dans `~/.config/autometa-jobs/config.env` et installe un lanceur `jobsctl` dans `~/.local/bin`. Plus rien à exporter : `jobsctl` retrouve les accès tout seul à chaque appel.
 
 ## Lancer un job
 
@@ -179,6 +172,7 @@ autometa-jobs/
 ├── orchestrator/   # l'API : déclenchement, suivi, réconciliation des runs
 ├── worker/         # ce qui tourne dans le container éphémère + dépose l'artefact
 ├── jobsctl/        # la CLI : pipelines, trigger, status, events, cancel
+├── bin/            # setup.sh : stocke les accès + installe le lanceur jobsctl
 ├── infra/          # scripts de provisionnement Scaleway
 └── *.md            # doc interne (conception, ressources d'infra)
 ```
