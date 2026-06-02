@@ -1,0 +1,264 @@
+{
+  "version": "v0.2",
+  "$comment": "Surcouche d'extension PARALLÈLE au schéma data·inclusion v1. Ne modifie pas `publics` / `conditions_acces` ; les enrichit depuis le texte libre. Numérique partout où c'est possible. Axes orthogonaux séparés. Pré-requis du service séparés des qualificateurs du public. Validé sur le corpus complet (92 179 services) — voir data/di/schema_validation.md.",
+  "validated_against": {
+    "corpus": "services-inclusion-2026-05-04.parquet",
+    "n_services": 92179,
+    "report": "data/di/schema_validation.md"
+  },
+  "definitions": {
+    "publics_extended": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Qualificateurs du BÉNÉFICIAIRE — qui est ciblé par le service.",
+      "properties": {
+        "age_min": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 120,
+          "$comment": "Convention : « moins de N ans » ⇒ age_max = N − 1 ; « N ans inclus » / « jusqu'à N ans » ⇒ N ; « +N ans » / « N ans et plus » / « à partir de N ans » ⇒ age_min = N. Sentinelle ma-boussole-aidants `Âge minimum : 0 Âge maximum : 120` (13 550 services soit 14.7%) doit être MAPPÉE en age_min=null age_max=null."
+        },
+        "age_max": {"type": ["integer", "null"], "minimum": 0, "maximum": 120},
+
+        "situation_familiale": {
+          "type": "array",
+          "items": {"enum": [
+            "parent_isole",
+            "famille_monoparentale",
+            "famille_avec_enfants",
+            "parent_d_eleve",
+            "parent_d_enfant_situation_handicap",
+            "famille_en_situation_de_precarite"
+          ]},
+          "$comment": "`parent_d_enfant_situation_handicap` couvre les services qui accueillent un enfant en situation de handicap (~4 600 services chez monenfant principalement) — le BÉNÉFICIAIRE direct est le parent."
+        },
+
+        "minima_sociaux": {
+          "type": "array",
+          "items": {"enum": [
+            "rsa", "aah", "ass", "aspa", "ata", "prime_activite",
+            "minima_sociaux_non_specifie"
+          ]},
+          "$comment": "PCH retiré ici (c'est une prestation handicap, pas un minimum social) → déplacé dans statut_handicap."
+        },
+
+        "statut_handicap": {
+          "type": "array",
+          "items": {"enum": [
+            "adulte_situation_handicap",
+            "rqth",
+            "boe",
+            "invalidite",
+            "pch"
+          ]},
+          "$comment": "BOE = Bénéficiaire de l'Obligation d'Emploi (la personne, pas l'OETH côté employeur). enfant_situation_handicap retiré : la cible est le parent → voir situation_familiale.parent_d_enfant_situation_handicap. tutelle/curatelle retirées d'ici → protection_juridique."
+        },
+
+        "protection_juridique": {
+          "type": "array",
+          "items": {"enum": ["tutelle", "curatelle"]}
+        },
+
+        "statut_principal": {
+          "type": ["string", "null"],
+          "enum": [
+            "demandeur_emploi",
+            "salarie",
+            "travailleur_independant",
+            "createur_repreneur_entreprise",
+            "stagiaire_formation_professionnelle",
+            "volontaire_service_civique",
+            "etudiant",
+            "retraite",
+            null
+          ],
+          "$comment": "Statut professionnel principal — un seul à la fois. ATTENTION sur `salarie` : action-logement (et certaines crèches d'entreprise) ciblent les services aux enfants/familles via le statut salarié du PARENT. L'extracteur doit lire le contexte : si le service est pour l'enfant et que `salarié` qualifie le parent, mettre `salarie` ici reste correct (c'est l'éligibilité du foyer)."
+        },
+
+        "demandeur_emploi_modalite": {
+          "type": "array",
+          "items": {"enum": [
+            "indemnise",
+            "non_indemnise",
+            "longue_duree",
+            "contrat_aide"
+          ]},
+          "$comment": "Précisions sur statut_principal=demandeur_emploi. `longue_duree` couvre DELD, DETLD, et les formulations type « inscrit à Pôle Emploi/France Travail depuis plus de N mois ». Vide si non précisé."
+        },
+
+        "type_contrat": {
+          "type": "array",
+          "items": {"enum": [
+            "cdi", "cdd", "interim", "alternance", "saisonnier",
+            "csp", "pec", "siae"
+          ]},
+          "$comment": "Orthogonal à secteur_activite. ATTENTION : ne capter QUE quand le contrat est un STATUT REQUIS du public (« être en CDI », « salariés en CDD », « public alternants »). Si le contrat est l'OBJECTIF du service (« aider à trouver un CDI », « décrocher un apprentissage »), NE PAS le mettre ici. C'est une distinction que l'extracteur doit faire en lisant le verbe du contexte."
+        },
+
+        "secteur_activite": {
+          "type": "array",
+          "items": {"enum": [
+            "prive_non_agricole",
+            "agricole",
+            "public",
+            "spectacle"
+          ]}
+        },
+
+        "situation_administrative": {
+          "type": "array",
+          "items": {"enum": [
+            "primo_arrivant",
+            "signataire_cir",
+            "refugie",
+            "beneficiaire_protection_internationale",
+            "beneficiaire_protection_subsidiaire",
+            "beneficiaire_protection_temporaire_ukrainiens",
+            "demandeur_asile",
+            "ressortissant_hors_ue",
+            "majeur",
+            "mineur_emancipe"
+          ]},
+          "$comment": "`majeur` UNIQUEMENT comme statut civil (« être majeur », « personne majeure », « majeur ou mineur émancipé »), JAMAIS comme adjectif (« défi majeur », « enjeu majeur », « rôle majeur »)."
+        },
+
+        "situation_hebergement": {
+          "type": "array",
+          "items": {"enum": [
+            "sans_hebergement",
+            "heberge",
+            "parcours_de_rue"
+          ]},
+          "$comment": "Statut d'hébergement du bénéficiaire. ATTENTION : DORA liste souvent les trois ensemble dans une énumération template (« Personnes sans hébergement / Hébergées / Ayant un parcours de rue »). Dans ce cas le service accepte les TROIS — l'extracteur doit cocher les trois. Si une seule est citée nominativement (sans énumération), ne cocher que celle-là. Le mode d'accueil d'urgence du SERVICE vit ailleurs (mode_accueil_urgence dans prerequis_extended)."
+        },
+
+        "statut_jeune": {
+          "type": "array",
+          "items": {"enum": [
+            "jeune_sortant_ase",
+            "jeune_descolarise",
+            "mineur_difficultes_familiales",
+            "etudiant_boursier"
+          ]}
+        },
+
+        "qualificateurs": {
+          "type": "array",
+          "items": {"enum": [
+            "femme",
+            "senior",
+            "habitant_qpv"
+          ]},
+          "$comment": "Qualificateurs sans borne numérique. `femme` exclut « sage-femme » (lookbehind). `senior_55_ans_et_plus` etc. retirés (la borne numérique vit dans age_min)."
+        }
+      }
+    },
+
+    "prerequis_extended": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Pré-requis du SERVICE — ce qu'il faut pour y accéder. Distinct des qualificateurs du public.",
+      "properties": {
+        "inscription_france_travail_requise": {
+          "type": "boolean",
+          "$comment": "Vrai si « Être inscrit à France Travail » est une condition explicite. NE PAS confondre avec « inscrits à Pôle Emploi depuis plus de 12 mois » qui est un descriptif du PUBLIC (DELD, à mettre dans demandeur_emploi_modalite.longue_duree)."
+        },
+
+        "prescription_requise": {
+          "type": "array",
+          "items": {"enum": [
+            "travailleur_social",
+            "ofii",
+            "prescripteur_generique",
+            "auto_positionnement_accepte"
+          ]}
+        },
+
+        "plafond_ressources": {
+          "type": "boolean",
+          "$comment": "Vrai si le texte mentionne explicitement un plafond ou une condition de ressources POSITIF. NE PAS confondre avec « sans condition de ressources » qui est l'INVERSE."
+        },
+
+        "revenu_fiscal_max_eur_par_part": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "$comment": "Seuil explicite en € sur le revenu fiscal de référence par part, quand chiffré (ex: 14 000 €/part chez Renault Group via mes-aides)."
+        },
+
+        "mode_accueil_urgence": {
+          "type": "boolean",
+          "$comment": "Vrai si le service propose un mode d'accueil d'urgence (mise à l'abri, accueil DAB/DRE, etc.) — caractéristique du service, pas du public."
+        },
+
+        "residence_geographique": {
+          "type": "array",
+          "items": {"enum": [
+            "france_hexagonale",
+            "france_metropolitaine",
+            "drom",
+            "qpv",
+            "departement_specifique",
+            "commune_specifique"
+          ]}
+        },
+
+        "niveau_francais_cecrl_min": {
+          "type": ["string", "null"],
+          "enum": ["infra_a1_1", "a1_1", "a1", "a2", "b1", "b2", null],
+          "$comment": "Niveau minimum requis sur l'échelle CECRL."
+        },
+
+        "besoins_pedagogiques": {
+          "type": "array",
+          "items": {"enum": [
+            "alphabetisation",
+            "illettrisme",
+            "lecture_ecriture",
+            "fle",
+            "fli",
+            "asl",
+            "competences_cles"
+          ]},
+          "$comment": "Type d'intervention pédagogique du service (et donc, le besoin présumé du public). Catégories non-mutuellement exclusives. Très fréquentes côté carif-oref / réseau-alpha. FLE = français langue étrangère ; FLI = français langue d'intégration ; ASL = atelier sociolinguistique."
+        }
+      }
+    }
+  },
+
+  "$dropped": {
+    "$comment": "Concepts présents dans v0.1/v0.2-candidate, retirés en v0.2 finale.",
+    "age_mentions_raw":              "redondant avec evidence_substring déjà obligatoire",
+    "senior_55_ans_et_plus":         "redondant avec age_min=55",
+    "senior_65_ans_et_plus":         "redondant avec age_min=65",
+    "femme_en_difficulte":           "trop flou, freq très basse",
+    "fratrie":                       "freq=0 dans v0.1, jamais observé",
+    "parent_eleve":                  "doublon avec parent_d_eleve (mais parent_d_eleve a aussi freq=0 sur 92k → à reconsidérer si extraction le remonte)",
+    "handicaps_moteurs":             "trop fin, hors taxonomie standard",
+    "documents_requis":              "hors scope (pré-requis administratifs détaillés)",
+    "competences_prerequises":       "hors scope (compétences ≠ public)",
+    "situation_d_urgence":           "ambigu, fusionné dans mode_accueil_urgence (booléen)",
+    "accueil_d_urgence":             "déplacé dans mode_accueil_urgence (booléen)",
+    "salarie_secteur_*":             "écraté en statut_principal × type_contrat × secteur_activite",
+    "salarie_nouvellement_embauche": "trop spécifique",
+    "salarie_en_mobilite":           "trop spécifique",
+    "salarie_cadre":                 "trop spécifique",
+    "artiste_technicien_spectacle":  "trop spécifique",
+    "adherent_csp":                  "déjà couvert par type_contrat=csp",
+    "saint_martin / corse":          "trop spécifiques, dans `commune_specifique`",
+    "oeth_obligation_employeur":     "doublon avec boe — c'est la même chaîne DORA. Garder boe (la personne) seul.",
+    "enfant_situation_handicap":     "déplacé en situation_familiale.parent_d_enfant_situation_handicap (le bénéficiaire est le parent)",
+    "tutelle_ou_curatelle":          "extrait de statut_handicap → protection_juridique (concept indépendant)",
+    "niveau_scolarisation":          "remplacé par besoins_pedagogiques (alphabétisation/illettrisme/lecture-écriture/etc., qui sont en pratique mêlés à FLE et plus fréquents que les niveaux CECRL bruts)"
+  },
+
+  "$llm_arbitration_required": {
+    "$comment": "Concepts où la regex seule ne peut pas trancher. L'extracteur LLM doit lire le contexte.",
+    "type_contrat": "Distinguer 'statut requis' vs 'objectif du service' (« aider à trouver un CDI »)",
+    "salarie": "Distinguer salarié de la STRUCTURE qui accueille du salarié BÉNÉFICIAIRE/PARENT (action-logement)",
+    "situation_hebergement": "Discerner l'énumération template DORA des trois statuts vs une mention nominative d'un seul",
+    "majeur": "Distinguer le statut civil de l'adjectif (« défi majeur »)",
+    "femme": "Exclure « sage-femme »",
+    "plafond_ressources": "Direction de la condition (« sans condition » = false ; « sous condition » = true)",
+    "age": "« 5 ans minimum » de scolarité ou « plus de 15 ans » d'ancienneté de logement ne sont PAS des bornes d'âge — exclure si contexte (scolarité, retraite, logement, ancienneté) est présent"
+  }
+}

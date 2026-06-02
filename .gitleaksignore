@@ -1,0 +1,2 @@
+# One-fingerprint-per-line. Format: <commit-sha>:<path>:<rule-id>:<line>
+# Example: 8b7754640c30a61e43c37d527b635e1f55643ca6:foo.py:generic-api-key:20

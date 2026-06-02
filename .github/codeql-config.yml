@@ -1,0 +1,4 @@
+paths-ignore:
+  - orchestrator/alembic/versions
+  - pipelines
+  - infra

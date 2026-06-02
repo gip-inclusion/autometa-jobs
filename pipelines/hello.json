@@ -1,0 +1,11 @@
+{
+  "name": "hello",
+  "system_prompt": "You are a focused assistant. Reply briefly and write a single haiku at the end.",
+  "config": {
+    "scaleway_job_definition_id": null,
+    "max_turns": 4,
+    "timeout_seconds": 600,
+    "memory_mb": 2048,
+    "cpu_mvcpu": 1000
+  }
+}

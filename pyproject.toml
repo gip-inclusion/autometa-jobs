@@ -1,0 +1,25 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    ".venv",
+    "alembic/versions",
+    "pipelines",
+]
+
+[tool.ruff.lint]
+preview = true
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"orchestrator/alembic/env.py" = ["E402"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.bandit]
+exclude_dirs = ["pipelines", ".venv", "infra"]
+skips = []

@@ -1,0 +1,19 @@
+[project]
+name = "autometa-jobs-jobsctl"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.1",
+    "httpx>=0.27",
+    "rich>=13.9",
+]
+
+[project.scripts]
+jobsctl = "jobsctl.cli:cli"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
