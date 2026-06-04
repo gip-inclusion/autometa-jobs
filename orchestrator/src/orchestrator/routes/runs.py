@@ -1,16 +1,22 @@
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from orchestrator import scaleway
+from orchestrator import s3, scaleway
 from orchestrator.auth import require_api_key, verify_run_hmac
 from orchestrator.db import get_session
 from orchestrator.models import TERMINAL_STATUSES, Run, RunEvent, RunStatus
 from orchestrator.schemas import EventIn, ResultIn, RunRead
+
+# Bounds for presigned-URL lifetime, in seconds.
+_PRESIGN_DEFAULT = 3600
+_PRESIGN_MAX = 86400
 
 # Two routers: user-facing (api key) and worker-facing (HMAC).
 api_router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(require_api_key)])
@@ -53,6 +59,42 @@ async def get_run_events(run_id: UUID, session: AsyncSession = Depends(get_sessi
         {"seq": e.seq, "event_type": e.event_type, "payload": e.payload, "created_at": e.created_at}
         for e in rows.scalars()
     ]
+
+
+@api_router.get("/{run_id}/output")
+async def get_run_output(
+    run_id: UUID,
+    presign: bool = False,
+    expires_in: int = _PRESIGN_DEFAULT,
+    session: AsyncSession = Depends(get_session),
+):
+    """The run's full artifact.
+
+    Default: stream the content (the agent reads it directly). With
+    ``?presign=1``: return ``{"url", "expires_in"}`` — a short-lived S3 GET URL
+    that forces a download, for the UI to link. Either way the artifact bytes
+    never need credentials on the consumer side; the orchestrator owns them.
+    """
+    run = await session.get(Run, run_id)
+    if run is None:
+        raise HTTPException(404, "run not found")
+    if not run.output_uri:
+        raise HTTPException(404, "run has no artifact")
+    try:
+        bucket, key = s3.parse_s3_uri(run.output_uri)
+    except ValueError as e:
+        raise HTTPException(500, f"bad output_uri: {e}") from e
+
+    if presign:
+        ttl = min(max(expires_in, 60), _PRESIGN_MAX)
+        url = await asyncio.to_thread(s3.presign_get, bucket, key, ttl, filename="output.md")
+        return {"url": url, "expires_in": ttl}
+
+    try:
+        body, content_type = await asyncio.to_thread(s3.read_object, bucket, key)
+    except Exception as e:
+        raise HTTPException(502, f"artifact fetch failed: {e}") from e
+    return Response(content=body, media_type=content_type)
 
 
 @api_router.post("/{run_id}/cancel", response_model=RunRead)
