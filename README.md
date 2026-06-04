@@ -132,7 +132,23 @@ un JSON avec ces champs…>. <Longueur, ton, langue.>
 CONTRAINTES
 - <ce qu'il ne faut surtout pas faire>
 - <limites : ne pas inventer de chiffres, citer les sources, etc.>
+- Si le livrable est volumineux : produis-le par lots sur plusieurs tours,
+  jamais tout en une seule réponse. Voir « Gros livrables » ci-dessous.
 ```
+
+### Gros livrables : produire par lots (limite de tokens)
+
+L'artefact final (`output.md` sur S3) est la **concaténation de tous les messages texte de l'agent**, dans l'ordre. Deux conséquences à garder en tête dès que le livrable est volumineux (longues listes, gros tableaux, CSV de centaines de lignes) :
+
+- **Une seule réponse de l'agent est plafonnée à ~32 000 tokens de sortie** (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`). Si la consigne pousse l'agent à tout cracher d'un coup, le run échoue avec `response exceeded the output token maximum` — et part souvent en timeout après de longues minutes bloquées.
+- **Seul le texte des messages est capturé.** Un fichier écrit sur le disque du container (un `.csv`, etc.) n'est **pas** récupéré ; la sortie d'un **sous-agent** (`Agent` / `Task`) non plus — elle revient comme résultat d'outil, hors artefact.
+
+Pour un gros livrable, dites-le donc explicitement dans la consigne :
+
+- **Produire par lots, sur plusieurs tours.** Ex. « traite les éléments par lots de 12 ; après chaque lot, lance un `echo` Bash trivial avant d'enchaîner ». Ce point de contrôle clôt le message courant et garde chaque réponse sous le plafond ; le worker recolle tout.
+- **Émettre le contenu dans le texte des messages**, pas sur le disque. Pour un CSV, un bloc ` ```csv ` ouvert au premier lot et fermé au dernier (les lots intermédiaires n'ajoutent que des lignes, sans rouvrir la balise ni répéter l'en-tête) se concatène en un bloc continu et propre.
+- **Interdire les sous-agents** si leur production doit finir dans l'artefact : « ne délègue pas à un sous-agent, produis tout toi-même ».
+- Dimensionnez `max_turns` en conséquence (1 tour d'en-tête + 1 par lot + une marge).
 
 Le bloc **ENTRÉE** dépend du mode visé (voir [Concepts fondamentaux](#concepts-fondamentaux)) :
 
