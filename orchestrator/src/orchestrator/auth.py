@@ -31,7 +31,7 @@ def verify_run_hmac(provided: str, expected: str | None, run_id: str, timestamp:
     # Reject stale or future-skewed timestamps before doing any crypto.
     try:
         ts = int(timestamp)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "bad timestamp") from None
     skew = abs(int(time.time()) - ts)
     if skew > HMAC_MAX_SKEW_SECONDS:
