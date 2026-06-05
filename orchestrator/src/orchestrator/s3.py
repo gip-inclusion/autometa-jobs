@@ -15,7 +15,7 @@ def parse_s3_uri(uri: str) -> tuple[str, str]:
     """Split ``s3://bucket/key/path`` into ``(bucket, key)``."""
     if not uri.startswith("s3://"):
         raise ValueError(f"not an s3 uri: {uri}")
-    bucket, _, key = uri[len("s3://"):].partition("/")
+    bucket, _, key = uri[len("s3://") :].partition("/")
     if not bucket or not key:
         raise ValueError(f"incomplete s3 uri: {uri}")
     return bucket, key
