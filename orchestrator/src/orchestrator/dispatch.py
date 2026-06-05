@@ -78,6 +78,7 @@ async def _dispatch_one() -> bool:
         # I/O
         "PIPOMETA_INPUT_URI": run.input_uri or "",
         "PIPOMETA_OUTPUT_BUCKET": settings.s3_bucket,
+        "PIPOMETA_OUTPUT_FORMAT": str(config.get("output_format") or "md"),
         "PIPOMETA_S3_ENDPOINT": settings.s3_endpoint,
         # Auth
         "CLAUDE_CODE_OAUTH_TOKEN": oauth_token,

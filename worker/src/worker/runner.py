@@ -66,18 +66,29 @@ def _read_prompt() -> str:
         return body
 
 
+# Output formats a pipeline may declare (config.output_format) → (filename, content-type).
+_OUTPUT_FORMATS = {
+    "md": ("output.md", "text/markdown; charset=utf-8"),
+    "csv": ("output.csv", "text/csv; charset=utf-8"),
+    "json": ("output.json", "application/json; charset=utf-8"),
+    "txt": ("output.txt", "text/plain; charset=utf-8"),
+}
+
+
 def _upload_artifact(text: str) -> str:
     bucket = os.environ["PIPOMETA_OUTPUT_BUCKET"]
     run_id = os.environ["PIPOMETA_RUN_ID"]
     pipeline = os.environ.get("PIPOMETA_PIPELINE_NAME", "unknown")
+    fmt = (os.environ.get("PIPOMETA_OUTPUT_FORMAT") or "md").lower()
+    filename, content_type = _OUTPUT_FORMATS.get(fmt, _OUTPUT_FORMATS["md"])
     ts = datetime.now(timezone.utc).strftime("%Y/%m/%d")
-    key = f"runs/{ts}/{pipeline}/{run_id}/output.md"
+    key = f"runs/{ts}/{pipeline}/{run_id}/{filename}"
     s3 = _s3_client()
     s3.put_object(
         Bucket=bucket,
         Key=key,
         Body=io.BytesIO(text.encode("utf-8")),
-        ContentType="text/markdown; charset=utf-8",
+        ContentType=content_type,
     )
     return f"s3://{bucket}/{key}"
 

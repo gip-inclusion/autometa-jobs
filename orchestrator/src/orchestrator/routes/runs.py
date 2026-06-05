@@ -87,7 +87,8 @@ async def get_run_output(
 
     if presign:
         ttl = min(max(expires_in, 60), _PRESIGN_MAX)
-        url = await asyncio.to_thread(s3.presign_get, bucket, key, ttl, filename="output.md")
+        filename = key.rsplit("/", 1)[-1] or "output.md"
+        url = await asyncio.to_thread(s3.presign_get, bucket, key, ttl, filename=filename)
         return {"url": url, "expires_in": ttl}
 
     try:
