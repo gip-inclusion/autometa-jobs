@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    cooldown:
+      default-days: 5
+
+  - package-ecosystem: "uv"
+    directory: "/jobsctl"
+    schedule:
+      interval: "daily"
+    cooldown:
+      default-days: 5
+    groups:
+      jobsctl:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directories:
+      - "/"
+      - "/orchestrator"
+      - "/worker"
+    schedule:
+      interval: "daily"
+    cooldown:
+      default-days: 5
+    versioning-strategy: increase
+    open-pull-requests-limit: 20
+    groups:
+      boto3:
+        patterns:
+          - "boto3"
+          - "botocore"
+          - "jmespath"
+          - "s3transfer"
+      pydantic:
+        patterns:
+          - "pydantic"
+          - "pydantic-settings"
+          - "pydantic-core"
