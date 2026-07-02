@@ -32,7 +32,8 @@ Sizing orchestrateur : 250 mvCPU / 512 MiB / `min-scale=1` / `max-scale=1`. Sizi
 | Nom | ID | Contenu |
 |-----|-----|---------|
 | `pipometa-claude-oauth-token` | `<secret-oauth-token-id>` | Le token OAuth Claude Max (`sk-ant-oat01-...`). Lu par l'orchestrateur à chaque dispatch, injecté dans l'env du worker. |
-| `pipometa-orchestrator-api-key` | `<secret-api-key-id>` | Le bearer token de l'API HTTP de l'orchestrateur. Utilisé par `jobsctl` et tout appelant. |
+| `pipometa-orchestrator-api-key` | `<secret-api-key-id>` | Le bearer token principal de l'API HTTP de l'orchestrateur. Utilisé par `jobsctl` et tout appelant. |
+| `pipometa-n8n-api-key` | `<secret-n8n-api-key-id>` | Bearer token dédié au client n8n (voir [N8N.md](N8N.md)). Actif via `PIPOMETA_EXTRA_API_KEYS` sur le container ; révocable indépendamment. |
 | `pipometa-db-password` | `<secret-db-password-id>` | Mot de passe de `pipometa_app`. Utilisé pour construire `PIPOMETA_DATABASE_URL`. |
 
 ## Container Registry

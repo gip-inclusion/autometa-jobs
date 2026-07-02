@@ -286,6 +286,7 @@ Quelques arêtes vives qui ont mordu pendant la construction :
 
 - [EXPLAINER.md](EXPLAINER.md) — visite guidée en langage clair, à partager
 - [ARCHITECTURE.md](ARCHITECTURE.md) — spec système, modèle de données, choix de design
+- [N8N.md](N8N.md) — recettes d'intégration pour le client n8n (déclencher, poller, récupérer)
 - [RESOURCES.md](RESOURCES.md) — IDs Scaleway vivants et ce qu'ils contiennent
 - [`.env.local`](.env.local) — env shell gitignoré pour les opérations
 - [`.env.example`](.env.example) — template pour redéploiements
