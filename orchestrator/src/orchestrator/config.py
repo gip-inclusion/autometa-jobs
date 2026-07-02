@@ -6,6 +6,8 @@ class Settings(BaseSettings):
 
     database_url: str
     api_key: str
+    extra_api_keys: str = ""
+    """Comma-separated additional bearer keys, one per client (e.g. n8n). Revoke a client by removing its key."""
 
     scaleway_region: str = "fr-par"
     scaleway_project_id: str

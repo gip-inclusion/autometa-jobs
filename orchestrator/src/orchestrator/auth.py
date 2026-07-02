@@ -13,9 +13,18 @@ from orchestrator.config import settings
 HMAC_MAX_SKEW_SECONDS = 300
 
 
+def _valid_keys() -> list[str]:
+    extras = [k.strip() for k in settings.extra_api_keys.split(",") if k.strip()]
+    return [settings.api_key, *extras]
+
+
 def require_api_key(authorization: str = Header(default="")) -> None:
-    expected = f"Bearer {settings.api_key}"
-    if not hmac.compare_digest(authorization, expected):
+    # Compare against every key unconditionally so timing doesn't leak which one matched.
+    matched = False
+    for key in _valid_keys():
+        if hmac.compare_digest(authorization, f"Bearer {key}"):
+            matched = True
+    if not matched:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid api key")
 
 
