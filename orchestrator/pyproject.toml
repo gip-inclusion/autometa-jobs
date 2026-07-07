@@ -12,7 +12,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "scaleway>=2.11",
-    "boto3>=1.35",
+    "boto3>=1.43.39",
     "python-dateutil>=2.9",
 ]
 
