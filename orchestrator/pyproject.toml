@@ -13,7 +13,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "scaleway>=2.11",
     "boto3>=1.43.42",
-    "python-dateutil>=2.9",
+    "python-dateutil>=2.9.0.post0",
 ]
 
 [build-system]
