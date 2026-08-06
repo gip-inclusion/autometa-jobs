@@ -3,7 +3,7 @@ name = "autometa-jobs-worker"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
-    "httpx>=0.27",
+    "httpx>=0.28.1",
     "boto3>=1.43.42",
     "pydantic>=2.9",
 ]
