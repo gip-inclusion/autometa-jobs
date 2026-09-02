@@ -5,7 +5,7 @@ requires-python = ">=3.14"
 dependencies = [
     "httpx>=0.28.1",
     "boto3>=1.43.75",
-    "pydantic>=2.9",
+    "pydantic>=2.13.4",
 ]
 
 [build-system]
