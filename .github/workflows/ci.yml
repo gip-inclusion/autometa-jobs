@@ -21,7 +21,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: pip install -r requirements-dev.txt
+      - name: Lockfiles in sync with pyproject
+        run: |
+          for d in orchestrator worker jobsctl; do uv lock --check --directory "$d"; done
       - run: ruff check orchestrator/src worker/src jobsctl/src
       - run: ruff format --check orchestrator/src worker/src jobsctl/src
 
@@ -35,6 +39,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - run: pip install -r requirements-dev.txt
 
       - name: Bandit (SAST)
@@ -42,23 +47,17 @@ jobs:
 
       - name: pip-audit (orchestrator)
         run: |
-          python -m venv /tmp/venv-orch
-          /tmp/venv-orch/bin/pip install -q ./orchestrator
-          /tmp/venv-orch/bin/pip freeze --exclude autometa-jobs-orchestrator > /tmp/orch-req.txt
-          pip-audit -r /tmp/orch-req.txt --strict
+          uv export --locked --no-dev --no-emit-project --no-hashes --directory orchestrator -o /tmp/orchestrator-req.txt
+          pip-audit -r /tmp/orchestrator-req.txt --strict
 
       - name: pip-audit (worker)
         run: |
-          python -m venv /tmp/venv-worker
-          /tmp/venv-worker/bin/pip install -q ./worker
-          /tmp/venv-worker/bin/pip freeze --exclude autometa-jobs-worker > /tmp/worker-req.txt
+          uv export --locked --no-dev --no-emit-project --no-hashes --directory worker -o /tmp/worker-req.txt
           pip-audit -r /tmp/worker-req.txt --strict
 
       - name: pip-audit (jobsctl)
         run: |
-          python -m venv /tmp/venv-jobsctl
-          /tmp/venv-jobsctl/bin/pip install -q ./jobsctl
-          /tmp/venv-jobsctl/bin/pip freeze --exclude autometa-jobs-jobsctl > /tmp/jobsctl-req.txt
+          uv export --locked --no-dev --no-emit-project --no-hashes --directory jobsctl -o /tmp/jobsctl-req.txt
           pip-audit -r /tmp/jobsctl-req.txt --strict
 
       - name: Gitleaks
