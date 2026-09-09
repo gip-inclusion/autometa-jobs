@@ -11,7 +11,7 @@ dependencies = [
     "alembic>=1.13",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.15.0",
-    "scaleway>=2.11",
+    "scaleway>=2.12.0",
     "boto3>=1.43.75",
     "python-dateutil>=2.9.0.post0",
 ]
