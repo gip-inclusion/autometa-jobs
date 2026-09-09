@@ -1,8 +1,9 @@
 FROM python:3.14-slim
+COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /usr/local/bin/uv
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    UV_NO_CACHE=1 \
+    PATH="/app/.venv/bin:$PATH"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates git \
@@ -21,9 +22,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
 RUN useradd -m -u 1000 runner
 
 WORKDIR /app
-COPY pyproject.toml ./
+# Dependencies first, from the lockfile only, so this layer caches across code changes.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
-RUN pip install -e .
+RUN uv sync --locked --no-dev
 
 USER runner
 ENV HOME=/home/runner

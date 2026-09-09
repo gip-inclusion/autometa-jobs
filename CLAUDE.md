@@ -206,6 +206,16 @@ docker push rg.fr-par.scw.cloud/nova-container-registry/pipometa-orchestrator:la
 scw container container redeploy $PIPOMETA_CONTAINER_ID region=$PIPOMETA_REGION
 ```
 
+### Dépendances (lockfiles)
+
+Chaque package (`orchestrator/`, `worker/`, `jobsctl/`) a un `uv.lock` ; les Dockerfiles installent avec `uv sync --locked`, donc l'image embarque exactement les versions verrouillées. Après toute modification de `pyproject.toml` :
+
+```sh
+uv lock --directory orchestrator   # ou worker / jobsctl
+```
+
+La CI refuse un lockfile désynchronisé (`uv lock --check`). Dependabot ouvre des PRs qui mettent à jour le lockfile ; les merger puis rebuild/push l'image pour que la mise à jour atteigne la prod.
+
 ### Schéma DB
 
 Migrations gérées par Alembic (sources : `orchestrator/alembic/versions/`).
