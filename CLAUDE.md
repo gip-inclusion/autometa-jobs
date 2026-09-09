@@ -186,6 +186,10 @@ print(s3.get_object(Bucket='pipometa', Key='runs/2026/05/04/hello/.../output.md'
 
 ## Déployer des changements
 
+**Merger sur `main` déploie.** Le workflow CI (`.github/workflows/ci.yml`), une fois lint/sécurité/docker au vert, construit les images dont les sources ont changé (`orchestrator/`, `worker/`), les pousse en `:latest` et `:<sha>` sur le registry, puis redéploie l'orchestrateur via l'API Scaleway et vérifie `/healthz`. Le worker n'a pas d'étape de déploiement : la job definition tire `:latest` à chaque run. Un `workflow_dispatch` depuis l'onglet Actions rebuild et redéploie tout à la main. Secrets GitHub utilisés : `SCW_SECRET_KEY`, `PIPOMETA_CONTAINER_ID`. Rollback : retagger `:<sha>` en `:latest` puis `scw container container redeploy`.
+
+Les recettes manuelles ci-dessous restent valables en dépannage.
+
 ### Image worker
 
 ```sh
