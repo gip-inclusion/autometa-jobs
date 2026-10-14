@@ -11,7 +11,9 @@ RUN apt-get update \
 
 # Install Claude Code CLI via Anthropic's official installer.
 # Resolve the dangling symlink to a stable system path so any user can run it.
-RUN curl -fsSL https://claude.ai/install.sh | bash \
+# CI passes the current release so a new CLI version busts the layer cache.
+ARG CLAUDE_CODE_VERSION=latest
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION" \
     && cp "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
     && chmod +x /usr/local/bin/claude \
     && /usr/local/bin/claude --version

@@ -137,11 +137,16 @@ jobs:
           registry: rg.fr-par.scw.cloud
           username: nologin
           password: ${{ secrets.SCW_SECRET_KEY }}
+      - name: Resolve Claude CLI version
+        id: claude
+        if: matrix.image == 'worker'
+        run: echo "version=$(curl -fsSL https://downloads.claude.ai/claude-code-releases/latest)" | tee -a "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.image }}
           platforms: linux/amd64
           push: true
+          build-args: ${{ matrix.image == 'worker' && format('CLAUDE_CODE_VERSION={0}', steps.claude.outputs.version) || '' }}
           tags: |
             rg.fr-par.scw.cloud/nova-container-registry/pipometa-${{ matrix.image }}:latest
             rg.fr-par.scw.cloud/nova-container-registry/pipometa-${{ matrix.image }}:${{ github.sha }}
