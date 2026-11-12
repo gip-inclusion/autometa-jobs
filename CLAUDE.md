@@ -93,7 +93,7 @@ autometa-jobs/
 
 Trois tables qui comptent (une quatrième, `schedules`, est réservée pour la v2) :
 
-- **`pipelines(id, name, system_prompt, config_jsonb)`** — `config_jsonb` porte `{scaleway_job_definition_id, allowed_tools, max_turns, model, output_format, ...}`. `output_format` (`md` par défaut, ou `csv`/`json`/`txt`) décide du nom et du content-type de l'artefact : le worker écrit `output.<ext>` et l'endpoint `/runs/:id/output` le sert tel quel. Le format ne transforme pas le contenu — c'est au system prompt d'émettre du CSV/JSON propre (cf. composer).
+- **`pipelines(id, name, system_prompt, config_jsonb)`** — `config_jsonb` porte `{scaleway_job_definition_id, allowed_tools, max_turns, model, output_format, agents, ...}`. `agents` (optionnel) déclare des sous-agents Claude natifs au format `claude --agents`, validés par `orchestrator/agents.py` et transmis au worker en `PIPOMETA_AGENTS` (cf. [ARCHITECTURE.md § Sous-agents natifs](ARCHITECTURE.md#sous-agents-natifs)). `output_format` (`md` par défaut, ou `csv`/`json`/`txt`) décide du nom et du content-type de l'artefact : le worker écrit `output.<ext>` et l'endpoint `/runs/:id/output` le sert tel quel. Le format ne transforme pas le contenu — c'est au system prompt d'émettre du CSV/JSON propre (cf. composer).
 - **`runs(id, pipeline_id, status, scaleway_job_run_id, input_uri, output_uri, summary, hmac_key, last_heartbeat_at, ...)`** — `input_uri` est `s3://bucket/key` ou une URL `https://` (présignée), jamais `http://` ; contrat dans [ARCHITECTURE.md § Cycle de vie](ARCHITECTURE.md#cycle-de-vie-dun-run). Le statut est l'un de `queued | starting | running | completed | failed | cancelled | timed_out | quota_blocked`.
 - **`run_events(id, run_id, seq, event_type, payload_jsonb)`** — journal append-only de la session. Le worker y écrit les events au fil de l'eau (started, prompt_loaded, assistant_message, tool_result, result, error, etc.).
 
@@ -152,7 +152,7 @@ JSON
 )"
 ```
 
-L'ID de la job-definition est toujours `$PIPOMETA_JOB_DEFINITION_ID`. Les outils sont les noms standards des outils Claude Code ; passez une liste vide pour tout interdire.
+L'ID de la job-definition est toujours `$PIPOMETA_JOB_DEFINITION_ID`. Les outils sont les noms standards des outils Claude Code. `allowed_tools` ne retire rien à l'agent : il tourne sous `--dangerously-skip-permissions`, où cette liste ne fait que pré-autoriser ce qui l'est déjà.
 
 ⚠️ **Livrable volumineux.** L'artefact est la concaténation des messages texte de l'agent, et **une réponse est plafonnée à ~32k tokens de sortie** ; le disque et les sous-agents ne sont pas capturés. Pour une grosse sortie (longues listes, CSV de centaines de lignes), la consigne doit imposer une production **par lots sur plusieurs tours** (un `echo` Bash entre chaque lot force la clôture du message) — sinon le run échoue avec `response exceeded the output token maximum`. Recette détaillée : [README § Gros livrables](README.md#gros-livrables--produire-par-lots-limite-de-tokens).
 
@@ -290,7 +290,7 @@ Du moins coûteux au plus coûteux à inspecter :
 - Pas de webhooks de complétion de run (poll l'API)
 - Pas de registre de serveurs MCP (les workers sont auto-suffisants — lisent l'input depuis S3 ou vont chercher avec leurs outils intégrés)
 - Pas de packaging de skills
-- Pas d'orchestration de sous-agents
+- Pas de délégation à de petits modèles externes (les sous-agents Claude natifs, eux, existent : `config.agents`)
 - Pas d'UI web
 - Pas de re-planification au changement de fenêtre quota 5h
 - Pas d'accès multi-locataire (mono-locataire est une hypothèse structurante)

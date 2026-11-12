@@ -7,11 +7,13 @@ on stdout, stderr drained in parallel.
 """
 
 import asyncio
+import contextlib
 import io
 import json
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -210,13 +212,202 @@ def _parse_assistant_blocks(event: dict) -> tuple[list[dict], list[str]]:
     return blocks, text_parts
 
 
+class AgentsConfigError(ValueError):
+    pass
+
+
+def _load_agents(raw: str) -> dict:
+    """Parse and check PIPOMETA_AGENTS, the sub-agents to pass to `claude --agents`.
+
+    The orchestrator already validated it against the full schema; this is a
+    last structural check so a corrupt value fails the run loudly instead of
+    starting a session silently stripped of its sub-agents.
+    """
+    try:
+        agents = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise AgentsConfigError(f"PIPOMETA_AGENTS is not valid JSON: {e}") from None
+    if not isinstance(agents, dict) or not agents:
+        raise AgentsConfigError("PIPOMETA_AGENTS must be a non-empty JSON object keyed by agent name")
+    for name, spec in agents.items():
+        if not isinstance(spec, dict):
+            raise AgentsConfigError(f"PIPOMETA_AGENTS[{name!r}] must be an object")
+        for key in ("description", "prompt"):
+            if not isinstance(spec.get(key), str) or not spec[key].strip():
+                raise AgentsConfigError(f"PIPOMETA_AGENTS[{name!r}].{key} must be a non-empty string")
+    return agents
+
+
+def build_command(system_prompt: str, env: Mapping[str, str], agents: dict) -> list[str]:
+    """argv for the claude CLI (the prompt goes in on stdin).
+
+    Without sub-agents it is the historical command, unchanged.
+    """
+    # Worker container runs as non-root `runner`, so the CLI accepts
+    # --dangerously-skip-permissions. The container itself is the security
+    # boundary (gVisor sandbox, ephemeral); inside, the agent should have
+    # full freedom. Under this flag PIPOMETA_ALLOWED_TOOLS (--allowedTools)
+    # only pre-approves tools, it removes none.
+    cmd = [
+        CLAUDE_BIN,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--system-prompt",
+        system_prompt,
+        "--dangerously-skip-permissions",
+        "-p",
+    ]
+    if extra_tools := (env.get("PIPOMETA_ALLOWED_TOOLS") or "").strip():
+        cmd.extend(["--allowedTools", extra_tools])
+    if max_turns := (env.get("PIPOMETA_MAX_TURNS") or "").strip():
+        cmd.extend(["--max-turns", max_turns])
+    if model := (env.get("PIPOMETA_MODEL") or "").strip():
+        cmd.extend(["--model", model])
+    if agents:
+        cmd.extend(["--agents", json.dumps(agents, ensure_ascii=False, separators=(",", ":"))])
+    return cmd
+
+
+# Keys of the CLI's background-task system events (task_started,
+# task_updated, task_notification) worth keeping for tracing sub-agent runs.
+# Prompts and output file paths are left out.
+_TASK_EVENT_KEYS = (
+    "task_id",
+    "tool_use_id",
+    "description",
+    "subagent_type",
+    "task_type",
+    "is_backgrounded",
+    "spawn_depth",
+    "status",
+    "summary",
+    "usage",
+)
+
+
+def _system_event_payload(ev: dict) -> dict:
+    payload = {"subtype": ev.get("subtype"), "message": ev.get("message")}
+    if ev.get("subtype") == "init":
+        payload["agents"] = ev.get("agents")
+        payload["tools"] = ev.get("tools")
+    elif str(ev.get("subtype") or "").startswith("task_"):
+        for key in _TASK_EVENT_KEYS:
+            if key in ev:
+                payload[key] = ev[key][:2000] if isinstance(ev[key], str) else ev[key]
+    return payload
+
+
+def _result_usage(ev: dict) -> dict:
+    usage = {
+        "duration_ms": ev.get("duration_ms"),
+        "duration_api_ms": ev.get("duration_api_ms"),
+        "num_turns": ev.get("num_turns"),
+        "total_cost_usd": ev.get("total_cost_usd"),
+        "usage": ev.get("usage"),
+        "subtype": ev.get("subtype"),
+    }
+    # Per-model usage and sub-agent counters, when the CLI reports them.
+    for key in ("modelUsage", "subagent_stats"):
+        if ev.get(key) is not None:
+            usage[key] = ev[key]
+    return usage
+
+
+def _add_result(total: dict | None, result: dict) -> dict:
+    """Fold one `result` event into the run's usage.
+
+    With background sub-agents the CLI ends a run with several result events:
+    turns, duration and token counts are per event; cost, per-model usage and
+    sub-agent counters are already running totals, and so is API time except
+    on a closing event with no turn, where it reads 0.
+    """
+    if total is None:
+        return result
+    previous = total.get("usage") or {}
+    return {
+        **result,
+        "num_turns": (total.get("num_turns") or 0) + (result.get("num_turns") or 0),
+        "duration_ms": (total.get("duration_ms") or 0) + (result.get("duration_ms") or 0),
+        "duration_api_ms": max(total.get("duration_api_ms") or 0, result.get("duration_api_ms") or 0),
+        "usage": {
+            key: previous.get(key, 0) + value if isinstance(value, int) else value
+            for key, value in (result.get("usage") or {}).items()
+        },
+    }
+
+
+# The CLI's delegation tool, "Agent" in the stream (formerly "Task").
+_DELEGATION_TOOLS = {"Agent", "Task"}
+
+
+def _missing_agents(init: dict, agents: dict) -> list[str]:
+    """Declared sub-agents the CLI's init event does not list as loaded."""
+    loaded = set(init.get("agents") or [])
+    return [name for name in agents if name not in loaded]
+
+
+def _unlisted_tools(init: dict, agents: dict) -> dict[str, list[str]]:
+    """Sub-agent tool names absent from the CLI's init tool list.
+
+    Only a warning: the CLI loads some tools on demand and leaves them out of
+    that list, so absence does not prove a typo.
+    """
+    listed = set(init.get("tools") or [])
+    if not listed:
+        return {}
+    if listed & _DELEGATION_TOOLS:
+        listed |= _DELEGATION_TOOLS
+    unlisted = {}
+    for name, spec in agents.items():
+        tools = [t for key in ("tools", "disallowedTools") for t in spec.get(key) or []]
+        if missing := [t for t in tools if t.split("(", 1)[0].strip() not in listed]:
+            unlisted[name] = missing
+    return unlisted
+
+
+class _Deliverable:
+    """The main agent's text, minus what it writes around its sub-agents.
+
+    Sub-agents run in the background: the main agent announces them in the
+    message that launches them and may write while they run ("the analyst is
+    still working…"). Neither belongs in the artifact.
+    """
+
+    def __init__(self) -> None:
+        self._parts: list[tuple[str | None, str]] = []
+        self._launching: set[str] = set()
+        self._running = False
+
+    def on_system(self, ev: dict) -> None:
+        if ev.get("subtype") == "background_tasks_changed":
+            self._running = bool(ev.get("tasks"))
+
+    def on_main_agent(self, ev: dict, parts: list[str]) -> None:
+        msg = ev.get("message") or {}
+        msg_id = msg.get("id")
+        # The CLI streams a message one content block at a time, all under the same id.
+        if any(b.get("type") == "tool_use" and b.get("name") in _DELEGATION_TOOLS for b in msg.get("content") or []):
+            if msg_id:
+                self._launching.add(msg_id)
+                self._parts = [(m, part) for m, part in self._parts if m != msg_id]
+            return
+        if self._running or msg_id in self._launching:
+            return
+        self._parts.extend((msg_id, part) for part in parts)
+
+    def text(self) -> str:
+        return "\n\n".join(part for _, part in self._parts).strip()
+
+
 async def run_pipeline(cancelled: asyncio.Event) -> int:
     client = OrchestratorClient()
     stop = asyncio.Event()
     hb = asyncio.create_task(_heartbeat_task(client, stop))
 
     seq = 1
-    final_text_parts: list[str] = []
+    deliverable = _Deliverable()
+    init_checked = False
     cli_stderr: list[str] = []
     token_usage: dict | None = None
     exit_code = 0
@@ -225,34 +416,16 @@ async def run_pipeline(cancelled: asyncio.Event) -> int:
         await client.event(seq, "started", {"pid": os.getpid()})
         seq += 1
 
-        prompt = await _read_prompt()
-        await client.event(seq, "prompt_loaded", {"chars": len(prompt)})
-        seq += 1
-
         system_prompt = (os.environ.get("PIPOMETA_SYSTEM_PROMPT") or "").strip() or (
             "You are a focused assistant. Be concise."
         )
-        # Worker container runs as non-root `runner`, so the CLI accepts
-        # --dangerously-skip-permissions. The container itself is the security
-        # boundary (gVisor sandbox, ephemeral); inside, the agent should have
-        # full freedom. Per-pipeline tool restrictions can be added via
-        # PIPOMETA_ALLOWED_TOOLS if needed.
-        cmd = [
-            CLAUDE_BIN,
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--system-prompt",
-            system_prompt,
-            "--dangerously-skip-permissions",
-            "-p",
-        ]
-        if extra_tools := (os.environ.get("PIPOMETA_ALLOWED_TOOLS") or "").strip():
-            cmd.extend(["--allowedTools", extra_tools])
-        if max_turns := (os.environ.get("PIPOMETA_MAX_TURNS") or "").strip():
-            cmd.extend(["--max-turns", max_turns])
-        if model := (os.environ.get("PIPOMETA_MODEL") or "").strip():
-            cmd.extend(["--model", model])
+        agents_raw = (os.environ.get("PIPOMETA_AGENTS") or "").strip()
+        agents = _load_agents(agents_raw) if agents_raw else {}
+        cmd = build_command(system_prompt, os.environ, agents)
+
+        prompt = await _read_prompt()
+        await client.event(seq, "prompt_loaded", {"chars": len(prompt)})
+        seq += 1
         # Pass the env through unchanged. Dispatch sets ANTHROPIC_API_KEY="" so
         # the CLI sees an explicit empty value rather than nothing — empty blocks
         # the API-key fallback path; unset would let some code paths re-resolve.
@@ -295,40 +468,54 @@ async def run_pipeline(cancelled: asyncio.Event) -> int:
                     continue
 
                 ev_type = ev.get("type")
+                # Messages produced inside a sub-agent carry the id of the
+                # delegating tool_use; the main agent's own messages carry none.
+                parent_id = ev.get("parent_tool_use_id")
                 if ev_type == "assistant":
                     blocks, parts = _parse_assistant_blocks(ev)
                     if blocks:
-                        await client.event(seq, "assistant_message", {"blocks": blocks})
+                        payload = {"blocks": blocks}
+                        if parent_id:
+                            payload["parent_tool_use_id"] = parent_id
+                        await client.event(seq, "assistant_message", payload)
                         seq += 1
-                    final_text_parts.extend(parts)
+                    # The artifact is the main agent's text only; a sub-agent
+                    # reports back to the main agent, not to the artifact.
+                    if not parent_id:
+                        deliverable.on_main_agent(ev, parts)
                 elif ev_type == "user":
                     msg = ev.get("message", {}) or {}
                     for block in msg.get("content", []) or []:
                         if block.get("type") == "tool_result":
                             content = block.get("content", "")
-                            await client.event(
-                                seq,
-                                "tool_result",
-                                {
-                                    "tool_use_id": block.get("tool_use_id"),
-                                    "content": str(content)[:2000],
-                                },
-                            )
+                            payload = {
+                                "tool_use_id": block.get("tool_use_id"),
+                                "content": str(content)[:2000],
+                            }
+                            if parent_id:
+                                payload["parent_tool_use_id"] = parent_id
+                            await client.event(seq, "tool_result", payload)
                             seq += 1
                 elif ev_type == "result":
-                    token_usage = {
-                        "duration_ms": ev.get("duration_ms"),
-                        "duration_api_ms": ev.get("duration_api_ms"),
-                        "num_turns": ev.get("num_turns"),
-                        "total_cost_usd": ev.get("total_cost_usd"),
-                        "usage": ev.get("usage"),
-                        "subtype": ev.get("subtype"),
-                    }
-                    await client.event(seq, "result", token_usage)
+                    result_usage = _result_usage(ev)
+                    token_usage = _add_result(token_usage, result_usage)
+                    await client.event(seq, "result", result_usage)
                     seq += 1
                 elif ev_type == "system":
-                    await client.event(seq, "system", {"subtype": ev.get("subtype"), "message": ev.get("message")})
-                    seq += 1
+                    deliverable.on_system(ev)
+                    # Why: progress events repeat what the sub-agent's own messages already trace.
+                    if ev.get("subtype") != "task_progress":
+                        await client.event(seq, "system", _system_event_payload(ev))
+                        seq += 1
+                    if ev.get("subtype") == "init" and agents and not init_checked:
+                        init_checked = True
+                        if unlisted := _unlisted_tools(ev, agents):
+                            await client.event(seq, "agents_warning", {"unlisted_tools": unlisted})
+                            seq += 1
+                        if missing := _missing_agents(ev, agents):
+                            with contextlib.suppress(ProcessLookupError):
+                                proc.terminate()
+                            raise AgentsConfigError(f"the claude CLI did not load sub-agent(s) {missing}")
                 elif ev_type == "error":
                     await client.event(seq, "claude_error", ev)
                     seq += 1
@@ -355,7 +542,7 @@ async def run_pipeline(cancelled: asyncio.Event) -> int:
             seq += 1
             return 1
 
-        artifact = "\n\n".join(final_text_parts).strip() or "(empty)"
+        artifact = deliverable.text() or "(empty)"
         output_uri = _upload_artifact(artifact)
         await client.result(output_uri=output_uri, summary=artifact[:280], token_usage=token_usage)
         return exit_code
