@@ -19,7 +19,7 @@ Tout en `fr-par`. Projet : `nova` (`<scaleway-project-id>`).
 
 ## Modèle de données (Postgres)
 
-- `pipelines(id, name, system_prompt, config_jsonb)` — `config_jsonb` porte `{scaleway_job_definition_id, allowed_tools, max_turns, model, ...}`.
+- `pipelines(id, name, system_prompt, config_jsonb)` — `config_jsonb` porte `{scaleway_job_definition_id, allowed_tools, max_turns, model, agents, ...}`. `agents` (optionnel) déclare des sous-agents Claude natifs, voir [Sous-agents natifs](#sous-agents-natifs).
 - `runs(id, pipeline_id, status, scaleway_job_run_id, input_uri, output_uri, summary, hmac_key, last_heartbeat_at, idempotency_key, ...)`. Statut : `queued | starting | running | completed | failed | cancelled | timed_out | quota_blocked`.
 - `run_events(id, run_id, seq, event_type, payload_jsonb)` — journal append-only de la session.
 - `schedules(id, pipeline_id, cron, next_run_at, enabled)` — réservée pour la v2. Aujourd'hui, la récurrence se fait avec des Container crons Scaleway qui tapent sur `POST /pipelines/:id/runs`.
@@ -68,9 +68,30 @@ Quatre choix non-évidents, chacun avec une histoire derrière :
 3. **Le worker passe par la CLI `claude`, pas par `claude-agent-sdk`.** Le SDK ne pipe pas stderr par défaut et tombe sur une chaîne en dur `"Check stderr output for details"` dans son `ProcessError`. Lancer la CLI directement avec `--output-format stream-json` est plus simple, transparent, et reprend le pattern utilisé en prod par autometa/matometa.
 4. **Le worker tourne en non-root.** La CLI refuse `--dangerously-skip-permissions` quand elle tourne en root, et la bonne réponse est de retirer le privilège, pas le flag — gVisor au niveau du container est la frontière de sécurité ; les prompts de permission par outil dans une sandbox éphémère ne seraient que de la friction sans valeur.
 
+## Sous-agents natifs
+
+Un pipeline peut déclarer des sous-agents Claude dans `config.agents`, au format de l'option `--agents` de la CLI. L'agent principal orchestre : il délègue par l'outil `Agent` (anciennement `Task`) une tâche à un sous-agent qui a son propre prompt, son propre contexte, ses propres outils et son propre modèle (Haiku pour extraire ou trier, Sonnet pour raisonner). Le contexte de l'agent principal ne reçoit que le compte rendu final du sous-agent, pas tout son travail intermédiaire. Tout reste dans le container du run, sur l'abonnement Max, sans nouveau secret.
+
+```json
+"agents": {
+  "extracteur": {"description": "Quand l'utiliser", "prompt": "Son system prompt", "model": "haiku", "tools": ["WebFetch"], "maxTurns": 6}
+}
+```
+
+- **Clés acceptées** : `description` et `prompt` (obligatoires, non vides), `model` (`haiku | sonnet | opus | inherit`), `tools`, `disallowedTools`, `maxTurns` (entier, 1 à 200). Ce sont des clés lues par la CLI (vérifiées sur la 2.1.322) ; toute autre clé est refusée, parce que la CLI, elle, ignore en silence une clé inconnue (une coquille comme `max_turns` ferait sauter un garde-fou sans bruit).
+- **Validation** à la création et à la mise à jour du pipeline (422), puis de nouveau au dispatch, avant de réserver le run (une config peut dater d'avant ou avoir été modifiée en SQL) : noms `[a-z0-9-]` (64 caractères max), 8 sous-agents max, 32 Kio max de JSON compact.
+- **Transport** : l'orchestrateur pose `PIPOMETA_AGENTS` (JSON compact) uniquement si `agents` est défini ; le worker ajoute `--agents <json>`. Sans `agents`, l'env et la commande `claude` sont strictement ceux d'avant. Une valeur invalide fait échouer le run avant la lecture de l'entrée et le lancement de la CLI, avec un message clair. Au démarrage de la session, le worker vérifie que la CLI a bien chargé chaque sous-agent déclaré et fait échouer le run sinon. Les noms d'outils d'un sous-agent ne sont pas vérifiés à la création (la CLI ignore en silence un nom inconnu, et sa liste d'outils varie selon la version) : un nom absent de la liste annoncée par la CLI est signalé par un event `agents_warning`, sans faire échouer le run, car certains outils chargés à la demande n'y figurent pas. Le plafond de 32 Kio tient sous les deux limites connues : aucune limite par variable n'est documentée pour les Jobs Scaleway (les Serverless Functions documentent 64 Kio par variable), et Linux plafonne une chaîne d'argv ou d'env à 128 Kio (`MAX_ARG_STRLEN`).
+- **Traçabilité** : les messages et résultats d'outil produits dans un sous-agent remontent dans `run_events` avec `parent_tool_use_id` (l'id de l'appel `Agent` qui les a délégués). Le résultat de cet appel n'est qu'un accusé de lancement ; le compte rendu revient à l'agent principal à la fin de la tâche. Les events `system` `task_started` / `task_updated` / `task_notification` gardent `task_id`, `subagent_type`, `status`, `summary`, `usage` (les events de progression ne sont pas stockés) ; l'event `init` garde les sous-agents et outils chargés. Un run avec sous-agents en arrière-plan se clôt sur plusieurs `result` : le `token_usage` du run les cumule et porte `subagent_stats` et `modelUsage` (consommation par modèle).
+- **Artefact** : c'est le texte de l'agent principal, pour tout run. Le texte d'un sous-agent n'y entre pas, ni ce que l'agent principal écrit dans le message qui lance un sous-agent ou pendant que des sous-agents tournent.
+- **Arrière-plan** : avec la CLI actuelle, un sous-agent est lancé en arrière-plan par défaut (`background: false` n'y change rien) ; l'agent principal reçoit une notification à la fin et reprend la main. En mode `-p`, la CLI attend la fin des sous-agents avant de sortir. L'agent principal a tendance à écrire un message d'attente (« l'analyste travaille encore… ») : le worker l'écarte de l'artefact (voir ci-dessus).
+
+**Garde-fous de coût, et ce qui reste ouvert.** `--max-turns` (le `max_turns` du pipeline) ne borne que l'agent principal. Chaque sous-agent est borné par son propre `maxTurns` et restreint par ses `tools` ; le choix d'un modèle plus léger par tâche est le principal levier. La CLI n'offre pas de borne globale fiable sur le nombre de sous-agents lancés dans un run : `CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION=1` n'a rien plafonné dans nos essais (2.1.322), on ne l'utilise donc pas, et aucun mécanisme maison n'est ajouté. Restent comme bornes externes : le timeout du Job (≤24h), la fenêtre de quota 5h de l'abonnement, et la consigne. Les sous-agents intégrés de la CLI (`general-purpose`, `Explore`, `Plan`) étaient déjà disponibles avant cette option ; `agents` ajoute des sous-agents spécialisés à côté.
+
+**À savoir** : sous `--dangerously-skip-permissions` (mode `bypassPermissions`), `--allowedTools` n'enlève aucun outil à l'agent, il ne fait qu'autoriser sans demande ce qui l'est de toute façon. Restreindre réellement l'agent principal passerait par `--disallowedTools` ou `--tools` ; pour un sous-agent, `tools` restreint bien sa boîte à outils.
+
 ## Hors-sujet (v1)
 
-Multi-locataire. Webhooks de complétion (on poll). Registre de serveurs MCP. Packaging de skills. Orchestration de sous-agents. UI web. Reprogrammation au changement de fenêtre quota 5h.
+Multi-locataire. Webhooks de complétion (on poll). Registre de serveurs MCP. Packaging de skills. Délégation à de petits modèles externes (relais Ollama et assimilés : hors de ce dépôt, voir l'issue Autometa #292 ; les sous-agents Claude natifs, eux, sont pris en charge, voir ci-dessus). UI web. Reprogrammation au changement de fenêtre quota 5h.
 
 ## Coût (estimation, mensuel)
 
